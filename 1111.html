@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>Gold Run With Coins</title>
+<style>
+body { margin:0; overflow:hidden; }
+#ui {
+  position:absolute;
+  top:10px; left:10px;
+  color:white;
+  font-size:18px;
+}
+</style>
+</head>
+<body>
+<div id="ui">Score: 0 | Coins: 0</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.152/build/three.min.js"></script>
+<script>
+let scene, camera, renderer;
+let player;
+let obstacles=[], coins=[];
+let lanes=[-3,0,3];
+let laneIndex=1;
+
+let speed=0.6;
+let score=0, coinScore=0;
+let difficulty=1;
+
+let jumping=false, sliding=false;
+let vy=0, gravity=0.03;
+
+init();
+animate();
+
+function init(){
+  scene=new THREE.Scene();
+  scene.background=new THREE.Color(0x87ceeb);
+
+  camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.1,500);
+  camera.position.set(0,5,10);
+  camera.lookAt(0,2,0);
+
+  renderer=new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(innerWidth,innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  scene.add(new THREE.HemisphereLight(0xffffff,0x444444,1));
+
+  const ground=new THREE.Mesh(
+    new THREE.BoxGeometry(20,1,500),
+    new THREE.MeshStandardMaterial({color:0x555555})
+  );
+  ground.position.z=-200;
+  scene.add(ground);
+
+  player=new THREE.Mesh(
+    new THREE.BoxGeometry(1,2,1),
+    new THREE.MeshStandardMaterial({color:0xffff00})
+  );
+  player.position.set(0,1,5);
+  scene.add(player);
+
+  spawnWave();
+  document.addEventListener("keydown",control);
+}
+
+function spawnWave(){
+  const count=Math.min(3,Math.floor(1+difficulty));
+  let used=[];
+  let hasJump=false, hasSlide=false;
+
+  while(used.length<count){
+    const lane=lanes[Math.floor(Math.random()*3)];
+    if(used.find(o=>o.lane===lane)) continue;
+
+    const types=["bus","car","gate"];
+    let type=types[Math.floor(Math.random()*types.length)];
+
+    if(type==="bus" && used.filter(o=>o.type==="bus").length>=1 && !hasJump && !hasSlide)
+      continue;
+
+    if(type==="car") hasJump=true;
+    if(type==="gate") hasSlide=true;
+
+    used.push({lane,type});
+  }
+
+  used.forEach(o=>{
+    createObstacle(o.type,o.lane);
+    spawnCoins(o.type,o.lane);
+  });
+}
+
+function createObstacle(type,lane){
+  let geo,y,color;
+  if(type==="bus"){ geo=[3,3,6]; y=1.5; color=0xff0000; }
+  if(type==="car"){ geo=[2,1.2,4]; y=0.6; color=0x0000ff; }
+  if(type==="gate"){ geo=[3,2.5,0.5]; y=1.25; color=0x000000; }
+
+  const o=new THREE.Mesh(
+    new THREE.BoxGeometry(...geo),
+    new THREE.MeshStandardMaterial({color})
+  );
+  o.position.set(lane,y,-120-Math.random()*40);
+  o.type=type;
+  scene.add(o);
+  obstacles.push(o);
+}
+
+function spawnCoins(type,lane){
+  if(Math.random()<0.5) return;
+
+  const coin=new THREE.Mesh(
+    new THREE.TorusGeometry(0.4,0.15,8,16),
+    new THREE.MeshStandardMaterial({color:0xffd700})
+  );
+
+  let y=1.2;
+  if(type==="car") y=2.5;      // 점프 코인
+  if(type==="gate") y=0.6;     // 슬라이딩 코인
+
+  coin.position.set(lane,y,-120-Math.random()*40);
+  scene.add(coin);
+  coins.push(coin);
+}
+
+function control(e){
+  if(e.key==="ArrowLeft" && laneIndex>0) laneIndex--;
+  if(e.key==="ArrowRight" && laneIndex<2) laneIndex++;
+  if(e.key===" " && !jumping){ vy=0.6; jumping=true; }
+  if(e.key==="ArrowDown" && !sliding){
+    sliding=true;
+    player.scale.y=0.5;
+    setTimeout(()=>{
+      sliding=false;
+      player.scale.y=1;
+    },Math.max(250,700-difficulty*120));
+  }
+}
+
+function gameOver(){
+  alert(`점수: ${score}\n코인: ${coinScore}`);
+  location.reload();
+}
+
+function animate(){
+  requestAnimationFrame(animate);
+
+  score++;
+  document.getElementById("ui").innerText=
+    `Score: ${score} | Coins: ${coinScore}`;
+
+  difficulty=1+score/1500;
+  speed=0.6*difficulty;
+
+  player.position.x+=(lanes[laneIndex]-player.position.x)*0.3;
+
+  if(jumping){
+    vy-=gravity;
+    player.position.y+=vy;
+    if(player.position.y<=1){
+      player.position.y=1;
+      jumping=false;
+    }
+  }
+
+  obstacles.forEach((o,i)=>{
+    o.position.z+=speed;
+    if(o.position.z>15){
+      scene.remove(o);
+      obstacles.splice(i,1);
+      if(obstacles.length===0) spawnWave();
+    }
+
+    if(Math.abs(o.position.z-player.position.z)<2 &&
+       Math.abs(o.position.x-player.position.x)<1.5){
+      if(o.type==="car" && jumping) return;
+      if(o.type==="gate" && sliding) return;
+      gameOver();
+    }
+  });
+
+  coins.forEach((c,i)=>{
+    c.position.z+=speed;
+    c.rotation.y+=0.1;
+
+    if(c.position.z>15){
+      scene.remove(c);
+      coins.splice(i,1);
+    }
+
+    if(Math.abs(c.position.z-player.position.z)<1.5 &&
+       Math.abs(c.position.x-player.position.x)<1){
+      coinScore++;
+      scene.remove(c);
+      coins.splice(i,1);
+    }
+  });
+
+  renderer.render(scene,camera);
+}
+</script>
+</body>
+</html>
